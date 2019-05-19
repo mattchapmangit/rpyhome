@@ -14,6 +14,7 @@ class OTAUpdater:
         self.github_repo = github_repo.rstrip('/').replace('https://github.com', 'https://api.github.com/repos')
         self.main_dir = main_dir
         self.module = module.rstrip('/')
+        print('__init__', self.github_repo, self.main_dir, self.module)
 
     @staticmethod
     def using_network(ssid, password):
@@ -42,6 +43,9 @@ class OTAUpdater:
                 versionfile.close()
 
     def download_and_install_update_if_available(self, ssid, password):
+        print(ssid, password, os.listdir(self.module))
+        OTAUpdater.using_network(ssid, password)
+        self.check_for_update_to_install_during_next_reboot()
         if 'next' in os.listdir(self.module):
             if '.version_on_reboot' in os.listdir(self.modulepath('next')):
                 latest_version = self.get_version(self.modulepath('next'), '.version_on_reboot')
@@ -58,7 +62,7 @@ class OTAUpdater:
         os.rename(self.modulepath('next/.version_on_reboot'), self.modulepath('next/.version'))
         os.rename(self.modulepath('next'), self.modulepath(self.main_dir))
         print('Update installed (', latest_version, '), will reboot now')
-        machine.reset()
+#        machine.reset()
 
     def apply_pending_updates_if_available(self):
         if 'next' in os.listdir(self.module):
