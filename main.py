@@ -90,60 +90,94 @@ class DateTime(Label):
 
 
 class Forecast(GridLayout):
+#    _alignment = dict(halign='left', size_hint=(None, None))
+    _alignment = {}
+
     def __init__(self, **kwargs):
         super().__init__(cols=2, **kwargs)
         self.summaryimg = Image()
-        self.summarylabel = Label()
-        self.hilabel = Label()
-        self.windlabel = Label()
+        self.summarylabel = Label(markup=True, **self._alignment)
+        self.templabel = Label(**self._alignment)
+        self.windlabel = Label(**self._alignment)
+
+        self.add_widget(Label(text='[b]Today:[/b]', markup=True, **self._alignment))
+        self.add_widget(Label(text='', **self._alignment))
 
         self.add_widget(self.summaryimg)
         self.add_widget(self.summarylabel)
 
-        self.add_widget(Label(text='High:'))
-        self.add_widget(self.hilabel)
+        self.add_widget(Label(text='High:', **self._alignment))
+        self.add_widget(self.templabel)
 
-        self.add_widget(Label(text='Wind:'))
+        self.add_widget(Label(text='Wind:', **self._alignment))
         self.add_widget(self.windlabel)
+        Clock.schedule_once(self.update, 5)
 
-    def update(self):
-#        r = requests.get(
-#            'https://api.weather.gov/points/35.0517,-120.5494',
-#            params={'User-agent': 'matt.chapman.us@gmail.com'}
-#        )
+    def update(self, wtf):
+        try:
+            self._update()
+        except Exception as e:
+            print('weather fail', e)
 
-#        r = requests.get(
-#            'http://api.openweathermap.org/data/2.5/forecast'
-#            '?units=imperial&id=5332963&APPID=f3817742506f4ee9ec20d26d8545938d'
-#        )
-        r = requests.get(
-            'http://api.openweathermap.org/data/2.5/forecast',
-            params={
-                'units': 'imperial',
-                'id': '5332963',
-                'APPID': 'f3817742506f4ee9ec20d26d8545938d',
-            }
-        )
+        # update once an hour
+        Clock.schedule_once(self.update, 60 * 60)
+
+    def _update(self):
+
+        session = requests.Session()
+        session.headers.update({'User-Agent': 'matt.chapman.us@gmail.com'})
+        r = session.get('https://api.weather.gov/points/35.0517,-120.5494')
         if not r:
-            return
-        if not r:
-            return
-        print(r)
-        addr = r.get('properties', {}).get('forecast', {})
+            return self
+        addr = r.json().get('properties', {}).get('forecast', {})
         if not addr:
-            return
-        forecast = requests.get(addr)
+            return self
+        forecast = session.get(addr)
         if not forecast:
-            return
-        periods = r.get('properties', {}).get('periods', [])
+            return self
+        periods = forecast.json().get('properties', {}).get('periods', [])
         if len(periods) < 1:
-            return
+            return self
         today = periods[0]
 
-        self.summaryimg.source = today['icon']
-        self.summarylabel.text = today['shortForecast']
-        self.hilabel.text = today['temperature']
+        icon = today['icon']
+        fields = icon.split('/')
+        fname = fields[-1].replace('medium', 'small')
+        localfile = 'web/images/%s' % fname
+        if not os.path.exists(localfile):
+            addr = '/'.join(fields[:-1] + [fname])
+            r = session.get(addr)
+            print('update image %s' % localfile)
+            with open(localfile, 'wb') as fp:
+                fp.write(r.content)
+            
+        self.summaryimg.source = localfile
+        self.summarylabel.text = '[b]%s[/b]' % today['shortForecast']
+        self.templabel.text = str(today['temperature'])
         self.windlabel.text = today['windSpeed'] + ' ' + today['windDirection']
+
+
+class HouseStatus(GridLayout):
+    def __init__(self, **kwargs):
+        super().__init__(cols=2, **kwargs)
+        self.garagelabel = Label(markup=True)
+
+        self.add_widget(Label(text='[b]House:[/b]', markup=True))
+        self.add_widget(Label(text=''))
+
+        self.add_widget(Label(text='Garage:'))
+        self.add_widget(self.garagelabel)
+        Clock.schedule_once(self.update, 5)
+
+    def update(self, wtf):
+        if 'Open' in self.garagelabel.text:
+            self.garagelabel.text = 'Closed'
+        else:
+            color = 'cf1943'
+            text = '[b][color=#%s]Open[/color][/b]' % color
+            self.garagelabel.text = text
+        Clock.schedule_once(self.update, 5)
+
 
 class WiFiButton(Button):
     def __init__(self, **kwargs):
@@ -192,8 +226,8 @@ class ThermostatApp(App):
         datebox.add_widget(self.wifibutton)
 
         weatherbox = BoxLayout(orientation='vertical', size_hint=(.3, .9))
-        self.weatherlabel = Forecast().update()
-        self.statuslabel = Label(text='Status')
+        self.weatherlabel = Forecast()
+        self.statuslabel = HouseStatus()
         weatherbox.add_widget(self.weatherlabel)
         weatherbox.add_widget(self.statuslabel)
 
