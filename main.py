@@ -10,6 +10,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.image import Image
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.button import Button
@@ -21,7 +22,7 @@ import os.path
 import sys
 import time
 from datetime import datetime
-from urllib.request import urlopen
+import requests
 import json
 import random
 import socket
@@ -48,7 +49,7 @@ kivy.require('1.11.1')  # replace with your current kivy version !
 ##############################################################################
 
 class ToggleTemp(ToggleButton):
-    def __init__(self, temp, lomax, himax, label, **kvargs):
+    def __init__(self, temp, lomax, himax, label, **kwargs):
         self.temp = temp
         self.rng = range(lomax, himax+1)
         self.label = label
@@ -56,7 +57,7 @@ class ToggleTemp(ToggleButton):
 #                         group='heat/cool',
                          background_color=(0,0,0,0),
                          markup=True,
-                         **kvargs)
+                         **kwargs)
 
     def set_text(self):
         self.text = self.get_text()
@@ -70,13 +71,13 @@ class ToggleTemp(ToggleButton):
 
 
 class DateTime(Label):
-    def __init__(self, fmt, align, seconds, **kvargs):
+    def __init__(self, fmt, align, seconds, **kwargs):
         self.fmt = fmt
         self.align = align
         self.seconds = seconds
         super().__init__(text=self.get_text(),
                          markup=True,
-                         **kvargs)
+                         **kwargs)
         Clock.schedule_once(self.update, seconds)
 
     def get_text(self):
@@ -88,9 +89,65 @@ class DateTime(Label):
         Clock.schedule_once(self.update, self.seconds)
 
 
+class Forecast(GridLayout):
+    def __init__(self, **kwargs):
+        super().__init__(cols=2, **kwargs)
+        self.summaryimg = Image()
+        self.summarylabel = Label()
+        self.hilabel = Label()
+        self.windlabel = Label()
+
+        self.add_widget(self.summaryimg)
+        self.add_widget(self.summarylabel)
+
+        self.add_widget(Label(text='High:'))
+        self.add_widget(self.hilabel)
+
+        self.add_widget(Label(text='Wind:'))
+        self.add_widget(self.windlabel)
+
+    def update(self):
+#        r = requests.get(
+#            'https://api.weather.gov/points/35.0517,-120.5494',
+#            params={'User-agent': 'matt.chapman.us@gmail.com'}
+#        )
+
+#        r = requests.get(
+#            'http://api.openweathermap.org/data/2.5/forecast'
+#            '?units=imperial&id=5332963&APPID=f3817742506f4ee9ec20d26d8545938d'
+#        )
+        r = requests.get(
+            'http://api.openweathermap.org/data/2.5/forecast',
+            params={
+                'units': 'imperial',
+                'id': '5332963',
+                'APPID': 'f3817742506f4ee9ec20d26d8545938d',
+            }
+        )
+        if not r:
+            return
+        if not r:
+            return
+        print(r)
+        addr = r.get('properties', {}).get('forecast', {})
+        if not addr:
+            return
+        forecast = requests.get(addr)
+        if not forecast:
+            return
+        periods = r.get('properties', {}).get('periods', [])
+        if len(periods) < 1:
+            return
+        today = periods[0]
+
+        self.summaryimg.source = today['icon']
+        self.summarylabel.text = today['shortForecast']
+        self.hilabel.text = today['temperature']
+        self.windlabel.text = today['windSpeed'] + ' ' + today['windDirection']
+
 class WiFiButton(Button):
-    def __init__(self, **kvargs):
-        super().__init__(**kvargs)
+    def __init__(self, **kwargs):
+        super().__init__(text='dont touch', **kwargs)
         self.ssid = ''
         self.passwd = ''
         self.bind(on_press=self.get_info)
@@ -106,6 +163,11 @@ class WiFiButton(Button):
                       context=box)
         popup.open()
 
+"""
+591 Woodgreen Way
+Nipomo, CA 93444
+35.051686, -120.549374
+"""
 
 class ThermostatApp(App):
 
@@ -130,7 +192,7 @@ class ThermostatApp(App):
         datebox.add_widget(self.wifibutton)
 
         weatherbox = BoxLayout(orientation='vertical', size_hint=(.3, .9))
-        self.weatherlabel = Label(text='Today')
+        self.weatherlabel = Forecast().update()
         self.statuslabel = Label(text='Status')
         weatherbox.add_widget(self.weatherlabel)
         weatherbox.add_widget(self.statuslabel)
