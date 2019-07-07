@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+
 #import schedule
 #import cherrypy
 from kivy.uix.screenmanager import ScreenManager, Screen, NoTransition
@@ -31,7 +32,7 @@ from kivy.uix.tabbedpanel import TabbedPanel
 from kivy.lang import Builder
 from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
-
+from kivy.factory import Factory
 
 ##############################################################################
 #                                                                            #
@@ -68,6 +69,33 @@ class ToggleTemp(ToggleButton):
             color = '1c6ed4' if self.label == 'Cool' else 'cf1943'
             text = '[color=#%s]%s[/color]' % (color, text)
         return text
+
+class SystemLabel(Label):
+    def __init__(self, heat, cool, **kwargs):
+        self.heat = heat
+        self.cool = cool
+        super().__init__(text=self.get_text(),
+                         markup=True,
+                         **kwargs)
+
+    def set_text(self):
+        self.text = self.get_text()
+
+    def get_text(self):
+        if self.heat.state == 'down':
+            htext = "[color=00ff00]Enabled[/color]"
+        else:
+            htext = 'Off'
+
+        if self.cool.state == 'down':
+            ctext = "[color=00ff00]Enabled[/color]"
+        else:
+            ctext = 'Off'
+
+        return ('[b]System:[/b]\n' +
+                "  Heat:     %s\n" % htext +
+                "  Cool:     %s\n" % ctext
+        )
 
 
 class DateTime(Label):
@@ -111,13 +139,21 @@ class Forecast(GridLayout):
 
         self.add_widget(Label(text='Wind:', **self._alignment))
         self.add_widget(self.windlabel)
+
         Clock.schedule_once(self.update, 5)
 
     def update(self, wtf):
         try:
-            self._update()
+            (self.summaryimg.source,
+             self.summarylabel.text,
+             self.templabel.text,
+             self.windlabel.text) = self._update()
         except Exception as e:
             print('weather fail', e)
+            self.summaryimg.source = 'web/images/NA.png'
+            self.summarylabel.text = '?'
+            self.templabel.text = '?'
+            self.windlabel.text = '?'
 
         # update once an hour
         Clock.schedule_once(self.update, 60 * 60)
@@ -128,16 +164,16 @@ class Forecast(GridLayout):
         session.headers.update({'User-Agent': 'matt.chapman.us@gmail.com'})
         r = session.get('https://api.weather.gov/points/35.0517,-120.5494')
         if not r:
-            return self
+            return '', '', '', ''
         addr = r.json().get('properties', {}).get('forecast', {})
         if not addr:
-            return self
+            return '', '', '', ''
         forecast = session.get(addr)
         if not forecast:
-            return self
+            return '', '', '', ''
         periods = forecast.json().get('properties', {}).get('periods', [])
         if len(periods) < 1:
-            return self
+            return '', '', '', ''
         today = periods[0]
 
         icon = today['icon']
@@ -150,11 +186,12 @@ class Forecast(GridLayout):
             print('update image %s' % localfile)
             with open(localfile, 'wb') as fp:
                 fp.write(r.content)
-            
-        self.summaryimg.source = localfile
-        self.summarylabel.text = '[b]%s[/b]' % today['shortForecast']
-        self.templabel.text = str(today['temperature'])
-        self.windlabel.text = today['windSpeed'] + ' ' + today['windDirection']
+
+        summary = '[b]%s[/b]' % today['shortForecast']
+        temp = str(today['temperature'])
+        wind = today['windSpeed'] + ' ' + today['windDirection']
+
+        return localfile, summary, temp, wind
 
 
 class HouseStatus(GridLayout):
@@ -178,6 +215,12 @@ class HouseStatus(GridLayout):
             self.garagelabel.text = text
         Clock.schedule_once(self.update, 5)
 
+class ImageButton(Image, Button):
+    def __init__(self, fname, **kwargs):
+        super().__init__(source=fname,
+                         background_color=(0,0,0,0),
+                         **kwargs)
+
 
 class WiFiButton(Button):
     def __init__(self, **kwargs):
@@ -197,27 +240,37 @@ class WiFiButton(Button):
                       context=box)
         popup.open()
 
-"""
-591 Woodgreen Way
-Nipomo, CA 93444
-35.051686, -120.549374
-"""
+def update_rect(instance, value):
+    instance.rect.pos = instance.pos
+    instance.rect.size = instance.size
+
+
+class BoxGroup(BoxLayout):
+    def __init__(self, color, **kwargs):
+        super().__init__(**kwargs)
+
+        with self.canvas.before:
+            Color(*color)
+            self.rect = Rectangle(size=self.size, pos=self.pos)
+
+        # listen to size and position changes
+        self.bind(pos=update_rect, size=update_rect)
+
 
 class ThermostatApp(App):
 
     def build(self):
         # Set up the thermostat UI layout:
-        self.thermostatUI = BoxLayout(orientation='vertical', size=(800, 480))
+        self.thermostatUI = BoxGroup(
+            orientation='vertical',
+            size=(800, 480),
+            color=(45.0/255.0, 100.0/255.0, 189.0/255.0, .5)
+        )
 
-        # Make the background black:
-        with self.thermostatUI.canvas.before:
-            Color(45.0/255.0, 100.0/255.0, 189.0/255.0, .5)
-            self.rect = Rectangle(size=(800, 480), pos=self.thermostatUI.pos)
-
-        # Create the rest of the UI objects ( and bind them to
-        # callbacks, if necessary ):
-
-        datebox = BoxLayout(orientation='horizontal', size_hint=(1, .1))
+        # Top row: date, time and wifi
+        datebox = BoxGroup(orientation='horizontal', size_hint=(1, .1),
+                           color=(0, 0, 0, 1)
+        )
         self.datelabel = DateTime(fmt='%a, %b %d', align='left', seconds=60)
         self.timelabel = DateTime(fmt='%I:%M %p', align='middle', seconds=5)
         self.wifibutton = WiFiButton()
@@ -225,27 +278,34 @@ class ThermostatApp(App):
         datebox.add_widget(self.timelabel)
         datebox.add_widget(self.wifibutton)
 
+        # Weather forecast and house status
         weatherbox = BoxLayout(orientation='vertical', size_hint=(.3, .9))
         self.weatherlabel = Forecast()
         self.statuslabel = HouseStatus()
         weatherbox.add_widget(self.weatherlabel)
         weatherbox.add_widget(self.statuslabel)
 
-        ctrlbox = BoxLayout(orientation='vertical', size_hint=(.2, .9))
-        self.upbutton = Button(text='Up')
+        # Temperature control box
+        ctrlbox = BoxGroup(orientation='vertical',
+                           size_hint=(.1, .8),
+                            padding=10,
+                           color=(0, 0, 0, .2))
+        self.upbutton = ImageButton('web/images/UpArrow.png')
         self.upbutton.increment = 1
-        self.dnbutton = Button(text='Down')
+        self.dnbutton = ImageButton('web/images/DnArrow.png')
         self.dnbutton.increment = -1
         self.coolbtn = ToggleTemp(70, 55, 90, 'Cool')
         self.heatbtn = ToggleTemp(70, 55, 90, 'Heat')
+#        ctrlbox.add_widget(Label(text='Target:'))
         ctrlbox.add_widget(self.upbutton)
         ctrlbox.add_widget(self.heatbtn)
         ctrlbox.add_widget(self.coolbtn)
         ctrlbox.add_widget(self.dnbutton)
 
+        # Temperature display box and system status
         tempbox = BoxLayout(orientation='vertical', size_hint=(.5, .9))
         self.templabel = Label(text='[size=70]74[sup]o[/sup][/size]', markup=True)
-        self.systemlabel = Label(text=self.system_text(), markup=True)
+        self.systemlabel = SystemLabel(self.heatbtn, self.coolbtn)
         tempbox.add_widget(self.templabel)
         tempbox.add_widget(self.systemlabel)
 
@@ -282,17 +342,8 @@ class ThermostatApp(App):
 
         self.coolbtn.set_text()
         self.heatbtn.set_text()
+        self.systemlabel.set_text()
 
-        #print('\n'.join(dir(control)))
-        return
-
-    def system_text(self):
-        heat = "[color=00ff00][b]On[/b][/color]" if self.heatbtn.state == 'down' else 'Off'
-        cool = "[color=00ff00][b]On[/b][/color]" if self.coolbtn.state == 'down' else 'Off'
-        return ('[b]System:[/b]\n' +
-                "  Heat:     %s\n" % heat +
-                "  Cool:     %s\n" % cool
-        )
 
 if __name__ == '__main__':
     try:
